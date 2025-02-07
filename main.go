@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -24,6 +26,63 @@ func waitYes() error {
 	}
 	if text != "yes\n" {
 		return cli.NewExitError(fmt.Errorf("中断します"), 1)
+	}
+	return nil
+}
+
+const MAX_VERSION = 12
+
+type versionEntry struct {
+	stage string
+	id    string
+}
+
+func removeStageForExcessVersions(client *secretsmanager.Client, id string) error {
+	result, err := client.ListSecretVersionIds(context.Background(), &secretsmanager.ListSecretVersionIdsInput{
+		SecretId:   aws.String(id),
+		MaxResults: aws.Int32(100),
+	})
+	if err != nil {
+		return err
+	}
+	// fmt.Printf("stageの数が%d個です\n", len(result.Versions))
+	if len(result.Versions) < MAX_VERSION {
+		return nil
+	}
+	targetVersions := make([]versionEntry, 0)
+	for _, version := range result.Versions {
+		nonTarget := false
+		versionStage := ""
+		for _, stage := range version.VersionStages {
+			if stage == "AWSCURRENT" || stage == "AWSPREVIOUS" {
+				nonTarget = true
+				break
+			}
+			if strings.HasPrefix(stage, "VERSION_") {
+				versionStage = stage
+			}
+		}
+		if !nonTarget && versionStage != "" {
+			targetVersions = append(targetVersions, versionEntry{
+				stage: versionStage,
+				id:    *version.VersionId,
+			})
+		}
+	}
+	sort.Slice(targetVersions, func(i, j int) bool {
+		return targetVersions[i].stage < targetVersions[j].stage
+	})
+	for i := 0; i < len(targetVersions)-MAX_VERSION; i++ {
+		fmt.Printf("stageが多すぎるので、stageを削除します%s\n", targetVersions[i].stage)
+		_, err = client.UpdateSecretVersionStage(context.Background(), &secretsmanager.UpdateSecretVersionStageInput{
+			SecretId:            aws.String(id),
+			VersionStage:        aws.String(targetVersions[i].stage),
+			MoveToVersionId:     nil,
+			RemoveFromVersionId: aws.String(targetVersions[i].id),
+		})
+		if err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -111,7 +170,10 @@ func changeAction(c *cli.Context) error {
 	if err != nil {
 		return cli.NewExitError(err, 1)
 	}
-
+	err = removeStageForExcessVersions(client, id)
+	if err != nil {
+		return cli.NewExitError(err, 1)
+	}
 	fmt.Println("更新が完了しました")
 	return nil
 }
