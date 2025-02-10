@@ -1,4 +1,4 @@
-module github.com/sdkawata/aws-ss-cli
+module github.com/sdkawata/aws-sm-cli
 
 go 1.23.4
 
@@ -6,6 +6,7 @@ require (
 	github.com/aws/aws-sdk-go-v2 v1.36.1
 	github.com/aws/aws-sdk-go-v2/config v1.29.6
 	github.com/aws/aws-sdk-go-v2/service/secretsmanager v1.34.18
+	github.com/joho/godotenv v1.5.1
 	github.com/josephburnett/jd v1.9.1
 	github.com/urfave/cli v1.22.16
 )

@@ -2,9 +2,7 @@ package main
 
 import (
 	"bufio"
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"sort"
@@ -103,13 +101,12 @@ func dumpAction(c *cli.Context) error {
 	if err != nil {
 		return cli.NewExitError(err, 1)
 	}
-	buf := bytes.NewBuffer([]byte{})
-	json.Indent(buf, []byte(*result.SecretString), "", "  ")
 	fileName := c.String("file")
-	if fileName != "" {
-		fileName = ".env"
+	dotEnved, err := jsonToDotEnv(*result.SecretString)
+	if err != nil {
+		return cli.NewExitError(err, 1)
 	}
-	err = os.WriteFile(fileName, buf.Bytes(), 0644)
+	err = os.WriteFile(fileName, []byte(dotEnved), 0644)
 	if err != nil {
 		return cli.NewExitError(err, 1)
 	}
@@ -133,10 +130,11 @@ func changeAction(c *cli.Context) error {
 		return cli.NewExitError(err, 1)
 	}
 	fileName := c.String("file")
-	if fileName == "" {
-		fileName = ".env"
-	}
 	file, err := os.ReadFile(fileName)
+	if err != nil {
+		return cli.NewExitError(err, 1)
+	}
+	jsoned, err := dotEnvToJson(string(file))
 	if err != nil {
 		return cli.NewExitError(err, 1)
 	}
@@ -144,7 +142,7 @@ func changeAction(c *cli.Context) error {
 	if err != nil {
 		return cli.NewExitError(err, 1)
 	}
-	new, err := jd.ReadJsonString(string(file))
+	new, err := jd.ReadJsonString(string(jsoned))
 	if err != nil {
 		return cli.NewExitError(err, 1)
 	}
@@ -159,18 +157,18 @@ func changeAction(c *cli.Context) error {
 	if err != nil {
 		return err
 	}
+	err = removeStageForExcessVersions(client, id)
+	if err != nil {
+		return cli.NewExitError(err, 1)
+	}
 	_, err = client.PutSecretValue(context.Background(), &secretsmanager.PutSecretValueInput{
 		SecretId:     aws.String(id),
-		SecretString: aws.String(string(file)),
+		SecretString: aws.String(string(jsoned)),
 		VersionStages: []string{
 			"AWSCURRENT",
 			"VERSION_" + time.Now().Format("20060102150405"),
 		},
 	})
-	if err != nil {
-		return cli.NewExitError(err, 1)
-	}
-	err = removeStageForExcessVersions(client, id)
 	if err != nil {
 		return cli.NewExitError(err, 1)
 	}
@@ -185,18 +183,19 @@ func revertAction(c *cli.Context) error {
 	}
 	client := secretsmanager.NewFromConfig(cfg)
 	id := c.String("id")
-	if id == "" {
-		return cli.NewExitError("idは必須です", 1)
-	}
 	result, err := client.GetSecretValue(context.Background(), &secretsmanager.GetSecretValueInput{
 		SecretId: aws.String(id),
 	})
 	if err != nil {
 		return cli.NewExitError(err, 1)
 	}
+	version := c.String("version")
+	if version == "" {
+		version = "AWSPREVIOUS"
+	}
 	prevResult, err := client.GetSecretValue(context.Background(), &secretsmanager.GetSecretValueInput{
 		SecretId:     aws.String(id),
-		VersionStage: aws.String("AWSPREVIOUS"),
+		VersionStage: aws.String(version),
 	})
 	if err != nil {
 		return cli.NewExitError(err, 1)
@@ -236,37 +235,51 @@ func main() {
 			Name: "dump",
 			Flags: []cli.Flag{
 				cli.StringFlag{
-					Name:  "id",
-					Usage: "secret id",
+					Name:     "id",
+					Usage:    "secretsmanagerのsecretのidを指定します",
+					Required: true,
 				},
 				cli.StringFlag{
-					Name: "file,f",
+					Name:     "file,f",
+					Usage:    "読み込み元のファイルを指定します",
+					Required: true,
 				},
 			},
-			Action: dumpAction,
+			Description: "secretsmanagerのsecretを読み込んで.env形式でファイルに書き出します",
+			Action:      dumpAction,
 		},
 		{
 			Name: "change",
 			Flags: []cli.Flag{
 				cli.StringFlag{
-					Name:  "id",
-					Usage: "secret id",
+					Name:     "id",
+					Usage:    "secretsmanagerのsecretのidを指定します",
+					Required: true,
 				},
 				cli.StringFlag{
-					Name: "file,f",
+					Name:     "file,f",
+					Usage:    "書き込み先のファイルを指定します",
+					Required: true,
 				},
 			},
-			Action: changeAction,
+			Description: ".envファイルを読み込んでsecretsmanagerのsecretを更新します",
+			Action:      changeAction,
 		},
 		{
 			Name: "revert",
 			Flags: []cli.Flag{
 				cli.StringFlag{
-					Name:  "id",
-					Usage: "secret id",
+					Name:     "id",
+					Usage:    "secretsmanagerのsecretのidを指定します",
+					Required: true,
+				},
+				cli.StringFlag{
+					Name:  "version,v",
+					Usage: "revert先のバージョンを指定します デフォルトではAWSPREVIOUSです",
 				},
 			},
-			Action: revertAction,
+			Description: "secretsmanagerのsecretを以前のバージョンに戻します",
+			Action:      revertAction,
 		},
 	}
 	app.Run(os.Args)
