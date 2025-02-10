@@ -10,6 +10,10 @@ import (
 	"github.com/joho/godotenv"
 )
 
+func containsSpecialCharForDotenv(s string) bool {
+	return strings.ContainsAny(s, " \\\"\n")
+}
+
 // jsonから.env形式に順序を維持して変換する
 func jsonToDotEnv(s string) (string, error) {
 	d := json.NewDecoder(bytes.NewReader([]byte(s)))
@@ -35,7 +39,16 @@ func jsonToDotEnv(s string) (string, error) {
 				return "", err
 			}
 			if valueString, ok := value.(string); ok {
-				result.WriteString(fmt.Sprintf("%s=%s\n", keyString, valueString))
+				if containsSpecialCharForDotenv(valueString) {
+					str, err := godotenv.Marshal(map[string]string{keyString: valueString})
+					if err != nil {
+						return "", err
+					}
+					result.WriteString(str)
+					result.WriteString("\n")
+				} else {
+					result.WriteString(fmt.Sprintf("%s=%s\n", keyString, valueString))
+				}
 			} else {
 				return "", fmt.Errorf("不正なjsonです")
 			}

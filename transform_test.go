@@ -20,7 +20,7 @@ func TestJsonToDotEnv(t *testing.T) {
 		},
 		{
 			"{\"key\":\"ここに二重引用符: \\\"value\"}",
-			"key=ここに二重引用符: \"value\n",
+			"key=\"ここに二重引用符: \\\"value\"\n",
 		},
 	}
 	for _, testCase := range testCases {
